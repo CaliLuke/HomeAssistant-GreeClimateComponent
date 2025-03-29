@@ -521,75 +521,56 @@ class GreeClimate(ClimateEntity):
             self._auto_xfan = False
 
     def GetDeviceKey(self):
-        _LOGGER.info("Retrieving HVAC encryption key")
-        GENERIC_GREE_DEVICE_KEY = "a3K8Bx%2r8Y7#xDh"
-        cipher = AES.new(GENERIC_GREE_DEVICE_KEY.encode("utf8"), AES.MODE_ECB)
-        # Call the API's pad method
-        padded_data = self._api._pad(
-            '{"mac":"' + str(self._mac_addr) + '","t":"bind","uid":0}'
-        ).encode("utf8")
-        pack = base64.b64encode(cipher.encrypt(padded_data)).decode("utf-8")
-        jsonPayloadToSend = (
-            '{"cid": "app","i": 1,"pack": "'
-            + pack
-            + '","t":"pack","tcid":"'
-            + str(self._mac_addr)
-            + '","uid": 0}'
-        )
+        _LOGGER.info("Attempting to bind device and retrieve encryption key via API (V1)...")
         try:
-            # Call the API's fetch method
-            result = self._api._fetch_result(cipher, jsonPayloadToSend)
-            self._encryption_key = result["key"].encode("utf8")
-        except:
-            _LOGGER.info("Error getting device encryption key!")
+            # Delegate binding to the API method
+            success = self._api.bind_device_v1()
+
+            if success:
+                _LOGGER.info("Successfully retrieved encryption key via API (V1).")
+                # Update HA state
+                self._device_online = True
+                self._online_attempts = 0
+                return True
+            else:
+                _LOGGER.error("API failed to bind device or retrieve key (V1).")
+                self._device_online = False
+                self._online_attempts = 0
+                # Should we reset self._api._encryption_key or self._api._cipher here? Probably not needed.
+                return False
+
+        except Exception as e:
+            # Catch potential exceptions from the API call itself (though handled internally)
+            _LOGGER.error("Unexpected error calling self._api.bind_device_v1: %s", e, exc_info=True)
             self._device_online = False
             self._online_attempts = 0
             return False
-        else:
-            _LOGGER.info("Fetched device encrytion key: %s" % str(self._encryption_key))
-            self.CIPHER = AES.new(self._encryption_key, AES.MODE_ECB)
-            self._device_online = True
-            self._online_attempts = 0
-            return True
 
     def GetDeviceKeyGCM(self):
-        _LOGGER.info("Retrieving HVAC encryption key (GCM)")
-        GENERIC_GREE_DEVICE_KEY = b"{yxAHAY_Lm6pbC/<"
-        plaintext = (
-            '{"cid":"'
-            + str(self._mac_addr)
-            + '", "mac":"'
-            + str(self._mac_addr)
-            + '","t":"bind","uid":0}'
-        )
-        # Call API's encrypt method
-        pack, tag = self._api._encrypt_gcm(GENERIC_GREE_DEVICE_KEY, plaintext)
-        jsonPayloadToSend = (
-            '{"cid": "app","i": 1,"pack": "'
-            + pack
-            + '","t":"pack","tcid":"'
-            + str(self._mac_addr)
-            + '","uid": 0, "tag" : "'
-            + tag
-            + '"}'
-        )
+        _LOGGER.info("Attempting to bind device and retrieve encryption key via API (V2/GCM)...")
         try:
-            # Call the API's fetch method, need to get the correct cipher
-            # TODO: Refactor how cipher is obtained/passed for GCM
-            cipher_gcm = self._api._get_gcm_cipher(GENERIC_GREE_DEVICE_KEY)
-            result = self._api._fetch_result(cipher_gcm, jsonPayloadToSend)
-            self._encryption_key = result["key"].encode("utf8")
-            # TODO: Update API's internal key/cipher state after successful key fetch?
-        except:
-            _LOGGER.info("Error getting device encryption key (GCM)!")
+            # Delegate binding to the API method
+            success = self._api.bind_device_v2()
+
+            if success:
+                _LOGGER.info("Successfully retrieved encryption key via API (V2/GCM).")
+                # Update HA state
+                self._device_online = True
+                self._online_attempts = 0
+                # Note: _encryption_key is now stored within self._api for V2
+                return True
+            else:
+                _LOGGER.error("API failed to bind device or retrieve key (V2/GCM).")
+                self._device_online = False
+                self._online_attempts = 0
+                return False
+
+        except Exception as e:
+            # Catch potential exceptions from the API call itself (though handled internally)
+            _LOGGER.error("Unexpected error calling self._api.bind_device_v2: %s", e, exc_info=True)
             self._device_online = False
             self._online_attempts = 0
             return False
-        else:
-            _LOGGER.info("Fetched device encrytion key: %s" % str(self._encryption_key))
-            self._device_online = True
-            self._online_attempts = 0
-            return True
 
     def GreeGetValues(self, propertyNames):
         _LOGGER.debug("Calling API get_status for properties: %s", propertyNames)

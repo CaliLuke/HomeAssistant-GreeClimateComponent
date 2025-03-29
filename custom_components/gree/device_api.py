@@ -334,3 +334,96 @@ class GreeDeviceApi:
         except Exception as e: # Catch any other unexpected errors
              _LOGGER.error("Unexpected error getting status: %s", e, exc_info=True)
              return None
+
+    def bind_device_v1(self) -> bool:
+        """Binds the device using V1 (ECB) encryption to get the real encryption key."""
+        _LOGGER.info("Attempting to bind device (V1) to retrieve encryption key...")
+        GENERIC_GREE_DEVICE_KEY = b"a3K8Bx%2r8Y7#xDh" # Note: use bytes
+
+        try:
+            # Create a temporary cipher with the generic key
+            generic_cipher = AES.new(GENERIC_GREE_DEVICE_KEY, AES.MODE_ECB)
+
+            # Create the binding payload
+            bind_payload = f'{{\"mac\":\"{self._mac}\",\"t\":\"bind\",\"uid\":0}}'
+
+            # Pad and encrypt the payload
+            padded_data = self._pad(bind_payload).encode("utf8")
+            encrypted_pack = base64.b64encode(generic_cipher.encrypt(padded_data)).decode("utf-8")
+
+            # Create the full JSON packet to send
+            json_payload_to_send = (
+                f'{{\"cid\":\"app\",\"i\":1,\"pack\":\"{encrypted_pack}\",'
+                f'\"t\":\"pack\",\"tcid\":\"{self._mac}\",\"uid\":0}}'
+            )
+
+            _LOGGER.debug("Sending V1 bind request payload: %s", json_payload_to_send)
+            # Call fetch_result using the temporary generic cipher
+            result = self._fetch_result(generic_cipher, json_payload_to_send)
+
+            if "key" in result:
+                self._encryption_key = result["key"].encode("utf8")
+                self._cipher = AES.new(self._encryption_key, AES.MODE_ECB)
+                _LOGGER.info("Successfully bound device (V1) and received key: %s", self._encryption_key)
+                return True
+            else:
+                _LOGGER.error("Binding V1 failed: 'key' not found in response: %s", result)
+                return False
+
+        except (socket.timeout, socket.error) as e:
+            _LOGGER.error("Socket error during V1 binding: %s", e)
+            return False
+        except (simplejson.JSONDecodeError, ValueError, KeyError) as e:
+             _LOGGER.error("Error processing response during V1 binding: %s", e)
+             return False
+        except Exception as e: # Catch any other unexpected errors
+             _LOGGER.error("Unexpected error during V1 binding: %s", e, exc_info=True)
+             return False
+
+    def bind_device_v2(self) -> bool:
+        """Binds the device using V2 (GCM) encryption to get the real encryption key."""
+        _LOGGER.info("Attempting to bind device (V2) to retrieve encryption key...")
+        GENERIC_GREE_GCM_KEY = b"{yxAHAY_Lm6pbC/<" # Use bytes
+
+        try:
+            # Create the plaintext binding payload
+            # Note: cid is the mac address for V2 binding?
+            plaintext_payload = (
+                 f'{{\"cid\":\"{self._mac}\",\"mac\":\"{self._mac}\",\"t\":\"bind\",\"uid\":0}}'
+            )
+
+            # Encrypt using the generic GCM key
+            pack, tag = self._encrypt_gcm(GENERIC_GREE_GCM_KEY, plaintext_payload)
+
+            # Create the full JSON packet to send
+            json_payload_to_send = (
+                f'{{\"cid\":\"app\",\"i\":1,\"pack\":\"{pack}\",'
+                f'\"t\":\"pack\",\"tcid\":\"{self._mac}\",\"uid\":0,\"tag\":\"{tag}\"}}'
+            )
+
+            _LOGGER.debug("Sending V2 bind request payload: %s", json_payload_to_send)
+
+            # Get the GCM cipher instance associated with the *generic* key for decryption
+            generic_gcm_cipher = self._get_gcm_cipher(GENERIC_GREE_GCM_KEY)
+
+            # Call fetch_result using the generic GCM cipher
+            result = self._fetch_result(generic_gcm_cipher, json_payload_to_send)
+
+            if "key" in result:
+                self._encryption_key = result["key"].encode("utf8")
+                # For V2, we don't store a persistent cipher, we create it as needed using the key
+                _LOGGER.info("Successfully bound device (V2) and received key: %s", self._encryption_key)
+                return True
+            else:
+                _LOGGER.error("Binding V2 failed: 'key' not found in response: %s", result)
+                return False
+
+        except (socket.timeout, socket.error) as e:
+            _LOGGER.error("Socket error during V2 binding: %s", e)
+            return False
+        except (simplejson.JSONDecodeError, ValueError, KeyError) as e:
+             _LOGGER.error("Error processing response during V2 binding: %s", e)
+             return False
+        except Exception as e: # Catch any other unexpected errors
+             _LOGGER.error("Unexpected error during V2 binding: %s", e, exc_info=True)
+             return False

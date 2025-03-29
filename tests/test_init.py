@@ -99,21 +99,20 @@ async def test_get_device_key_gcm(
 
     # Assertions
     # 1. Check _encrypt_gcm call - Use the exact plaintext from GetDeviceKeyGCM
+    # Replicate the f-string format used in bind_device_v2
     expected_bind_plaintext = (
-        '{"cid":"'
-        + device_v2._mac_addr
-        + '", "mac":"'
-        + device_v2._mac_addr
-        + '","t":"bind","uid":0}'
+        f'{{"cid":"{device_v2._mac_addr}","mac":"{device_v2._mac_addr}","t":"bind","uid":0}}'
     )
+
+    # Use the correct bytes literal for the default key
     mock_encrypt_gcm.assert_called_once_with(
-        GCM_DEFAULT_KEY.encode("utf8"),  # Use the actual default key from climate.py
+        b"{yxAHAY_Lm6pbC/<",  # Actual default key used in bind_device_v2
         expected_bind_plaintext,
     )
 
     # 2. Check _get_gcm_cipher call
     # This should also use the default key
-    mock_get_gcm_cipher.assert_called_once_with(GCM_DEFAULT_KEY.encode("utf8"))
+    mock_get_gcm_cipher.assert_called_once_with(b"{yxAHAY_Lm6pbC/<")
 
     # 3. Check _fetch_result call (Payload has i=1 hardcoded in GetDeviceKeyGCM)
     expected_payload_dict = {
@@ -135,7 +134,8 @@ async def test_get_device_key_gcm(
 
     # 4. Check returned value and stored key
     assert returned_key is True
-    assert device_v2._encryption_key == NEW_GCM_KEY.encode("utf8")
+    # The key should now be stored within the API object
+    assert device_v2._api._encryption_key == NEW_GCM_KEY.encode("utf8")
 
 
 async def test_init_with_optional_entities(mock_hass: HomeAssistant):
